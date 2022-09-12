@@ -1,0 +1,137 @@
+---
+title: "Email Graph"
+author: "Bill"
+date: '2022-08-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(igraph)
+library(dplyr)
+```
+
+We read in the email graph data.
+
+```{r}
+emails = read.csv('email-Eu-core.txt', sep = ' ' , header = FALSE)
+
+drop_rows <- c()
+for(r in 1:nrow(emails)){
+  if(emails[r,1] == emails[r,2]){
+    drop_rows <- c(drop_rows, r)
+  }
+}
+emails <- emails[-drop_rows,]
+
+head(emails)
+
+rm(drop_rows)
+```
+
+We investigate the current node names.
+
+```{r}
+nodes <- sort(union(emails[,1], emails[,2]))
+head(nodes)
+tail(nodes)
+length(nodes)
+```
+
+We see the nodes are named 0 to 1004 inclusive. To generate a graph from this data we simply add one to each of the node names.
+
+```{r}
+nodes <- nodes + 1
+emails <- emails + 1
+email_graph <- graph_from_edgelist(as.matrix(emails), directed = F)
+```
+
+And we check the adjacency has the right size.
+
+```{r}
+dim(get.adjacency(email_graph))
+rm(email_graph)
+```
+
+Great, we are now ready to take samples from this graph. We start by assigning the nodes into 5 groups.
+
+```{r}
+nodes <- sample(nodes)
+chunk_number <- 5
+assignment <- data.frame(rep_len(1:chunk_number, length(nodes)))
+row.names(assignment) <- nodes
+```
+
+```{r}
+primes <- c(2,3,5,7,11,13,17)
+```
+
+```{r}
+emails <- emails %>% mutate(key = primes[assignment[as.character(V1), 1]] * primes[assignment[as.character(V2), 1]])
+
+emails <- emails %>% mutate(graph = 0)
+```
+
+```{r}
+for(g in 1:chunk_number){
+  for(r in 1:nrow(emails)){
+    if(emails[r, 3] %% primes[g] == 0 & emails[r, 3] < (primes[g] ** 2) + 1 &
+       emails[r, 4] == 0){
+      emails[r,4] = g
+    }
+    if(emails[r, 3] %% primes[g] == 0 & emails[r, 4] == 0 &
+       sample(c(T, F), size = 1)){
+      emails[r,4] = g
+    }
+  }
+}
+rm(g, r, chunk_number)
+```
+
+```{r}
+table(emails[, 4])
+```
+
+Need some chunk which adjusts the edges to external nodes to single nodes.
+
+```{r}
+sub_edge_list <- emails[emails$graph == 1,]
+
+for(r in 1:nrow(sub_edge_list)){
+  if(assignment[as.character(sub_edge_list[r,1]), 1] != 1){
+    sub_edge_list[r, 1] = 
+      assignment[as.character(sub_edge_list[r,1]), 1] + 2000
+  }
+  if(assignment[as.character(sub_edge_list[r,2]), 1] != 1){
+    sub_edge_list[r, 2] = 
+      assignment[as.character(sub_edge_list[r,2]), 1] + 2000
+  }
+}
+
+sub_edge_list <- sub_edge_list[,1:2]
+
+rm(r)
+```
+
+Then the standard fix for generating graphs with non-consecutive node names.
+
+```{r}
+sub_nodes <- union(sub_edge_list[,1], sub_edge_list[,2])
+length(sub_nodes)
+
+new_names <- data.frame(1:length(sub_nodes))
+row.names(new_names) <- sub_nodes
+
+sub_edge_list <- sub_edge_list %>% mutate(V1 = new_names[as.character(V1),1])
+sub_edge_list <- sub_edge_list %>% mutate(V2 = new_names[as.character(V2),1])
+
+union(sub_edge_list[,1], sub_edge_list[,2])
+
+rm(new_names, sub_nodes)
+```
+
+Great, this has worked. We generate the graph.
+
+```{r}
+subgraph <- graph_from_edgelist(as.matrix(sub_edge_list), directed = F)
+```
